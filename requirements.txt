@@ -8,3 +8,4 @@ randomcolor
 scikit-learn
 tqdm
 typing
+python-dotenv
