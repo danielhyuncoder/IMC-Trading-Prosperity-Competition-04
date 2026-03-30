@@ -1,18 +1,48 @@
-from datamodel import TradingState, Listing, OrderDepth, Observation
+from datamodel import TradingState, Listing, OrderDepth, Observation, Trade
 import pandas as pd
 import os
 from typing import Dict, List
-
-IGNORE_COLS = {"mid_price", "product", "profit_and_loss"}
+from dotenv import load_dotenv
+IGNORE_COLS = {"mid_price", "product", "profit_and_loss", "buyer", "seller", "symbol"}
+load_dotenv()
 
 def clean_df(raw_df: pd.DataFrame) -> pd.DataFrame:
     df = raw_df.iloc[:, 0].str.split(";", expand=True)
     df.columns = raw_df.columns[0].split(";")
     df = df.replace("", 0)
+    
+    if "buyer" in df.columns:
+      DENOMINATION = os.getenv("DENOMINATION", "XIRECS")
+      df["buyer"].replace(0, "", inplace=True)
+      df["seller"].replace(0, "", inplace=True)
+      df["currency"].replace(0, DENOMINATION, inplace=True)
     for col in df.columns:
         if col not in IGNORE_COLS:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
     return df
+
+def get_all_symbols(file_path: str) -> List[str]:
+    try:
+        raw_df = clean_df(pd.read_csv(file_path))
+    except Exception as e:
+        raise Exception(f"File cannot be read: {e}")
+    return raw_df["product"].unique()
+
+def csv_to_trades(file_path: str) -> List[Trade]:
+    try:
+        raw_df = pd.read_csv(file_path)
+    except Exception as e:
+        raise Exception(f"File cannot be read: {e}")
+
+    df = clean_df(raw_df)
+
+    ans: List[Trade] = []
+
+    for timestamp, timestamp_df in df.groupby("timestamp", sort=True):
+        row = timestamp_df.iloc[0]
+        ans.append(Trade(row["symbol"], row["price"], row["quantity"], row["buyer"], row["seller"], timestamp))
+
+    return ans
 
 def csv_to_trading_states(file_path: str) -> List[TradingState]:
     try:
@@ -22,7 +52,7 @@ def csv_to_trading_states(file_path: str) -> List[TradingState]:
 
     df = clean_df(raw_df)
 
-    DENOMINATION = os.getenv("DENOMINATION", "USD")
+    DENOMINATION = os.getenv("DENOMINATION", "XIRECS")
     OB_RANGE = int(os.getenv("OB_RANGE", 2))
 
     ans: List[TradingState] = []
@@ -46,7 +76,7 @@ def csv_to_trading_states(file_path: str) -> List[TradingState]:
                 if bid_price > 0 and bid_volume > 0:
                     order_depth.buy_orders[int(bid_price)] = int(bid_volume)
                 if ask_price > 0 and ask_volume > 0:
-                    order_depth.sell_orders[int(ask_price)] = int(ask_volume)
+                    order_depth.sell_orders[int(ask_price)] = -int(ask_volume)
 
             order_depths[symbol] = order_depth
 
@@ -64,3 +94,4 @@ def csv_to_trading_states(file_path: str) -> List[TradingState]:
         )
 
     return ans
+
