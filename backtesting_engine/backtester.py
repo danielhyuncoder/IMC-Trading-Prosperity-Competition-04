@@ -90,7 +90,7 @@ class Backtester:
                 for order in result[symbol]:
                     if order.quantity < 0: #short
                         #check limit enforcement
-                        if old_quantity + short_sum >= position_limits_dict[symbol]:
+                        if old_quantity + short_sum > position_limits_dict[symbol]:
                             continue
                         total_request = abs(order.quantity)
                         while total_request > 0 and len(bids_sorted) != 0 and bids_sorted[0][0] >= order.price:
@@ -99,11 +99,11 @@ class Backtester:
                              bids_sorted[0][1]-=delta
                              position[symbol]-=delta 
                              own_trades[symbol].append(Trade(symbol, bids_sorted[0][0], -delta, "", "SUBMISSION", state.timestamp))
-                             if bids_sorted[0][1] <= 0:
+                             if bids_sorted[0][1] == 0:
                                 del bids_sorted[0]
                     else: #long
                         #check limit enforcement
-                        if old_quantity + long_sum >= position_limits_dict[symbol]:
+                        if old_quantity + long_sum > position_limits_dict[symbol]:
                             continue
                         total_request = order.quantity
                         while total_request > 0 and len(asks_sorted) != 0 and asks_sorted[0][0] <= order.price:
@@ -112,14 +112,16 @@ class Backtester:
                              asks_sorted[0][1]+=delta
                              position[symbol]+=delta 
                              own_trades[symbol].append(Trade(symbol, asks_sorted[0][0], delta, "SUBMISSION", "", state.timestamp))
-                             if asks_sorted[0][1] >= 0:
+                             if asks_sorted[0][1] == 0:
                                 del asks_sorted[0]
-                for symbol in self.symbols:
-                    for trade in own_trades[symbol]:
-                        if trade.buyer == "SUBMISSION":
-                            cash[symbol] -= trade.quantity * trade.price
-                        else:
-                            cash[symbol] += trade.quantity * trade.price
+
+
+            for symbol in self.symbols:
+                for trade in own_trades[symbol]:
+                    if trade.buyer == "SUBMISSION":
+                        cash[symbol] -= trade.quantity * trade.price
+                    else:
+                        cash[symbol] += abs(trade.quantity) * trade.price
 
                 
                 # Computing PNL (Going to change in the future)
