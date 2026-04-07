@@ -7,6 +7,9 @@ from trader import Trader
 from dotenv import load_dotenv
 from position_limits import position_limits_dict
 from visualizer import BacktestingResult
+import math
+import numpy as np
+import random
 load_dotenv()
 
 
@@ -16,9 +19,26 @@ class Backtester:
         self.symbols= get_all_symbols(order_book_csv_name)
         self.trades = csv_to_trades(trades_csv_name)
         self.trades.sort(key=lambda t: t.timestamp)
+
+        # Probabilistic fill settings
+        self.edge_limit = 2
+        self.k: float = 2
+        self.fill_min: float = 0.1
+        self.fill_max: float = 0.2
+        self.shifter: float = 2.5
+        self.tick_sizes = {
+            "EMERALDS": 2,
+            "TOMATOES": 1
+        }
     def include_observations(self, observation_csv_name:str):
         pass
-    def run_trader(self, trader: Trader) -> BacktestingResult:
+    def get_fill_probability(self, edge: int) -> float:
+        return 1 / (1 + math.exp(-(self.k * (edge-self.shifter))))
+    def get_fill_amount(self, edge: int) -> float:
+        rng: float = random.uniform(self.fill_min, self.fill_max)
+        edge_aspect: float = self.get_fill_probability(edge)
+        return rng*edge_aspect
+    def run_trader(self, trader: Trader, enable_probabilistic_fills: bool = False) -> BacktestingResult:
         own_trades: Dict[Symbol, List[Trade]] = {}
         market_trades: Dict[Symbol, List[Trade]] = {}
         position: Dict[Symbol, Position] = {}
@@ -80,6 +100,10 @@ class Backtester:
                 # check position limits first
                 fill_ratios[symbol]=0.0
                 ratio_denominator: float = 0.0
+                
+                long_denominator: float = 0.0
+                short_denominator: float = 0.0
+
                 long_sum: float=0
                 short_sum:float=0
                 for order in result[symbol]:
@@ -101,37 +125,97 @@ class Backtester:
                 bids_sorted.sort(reverse=True)
                 old_quantity = position[symbol]
                 
+                
+                
+
                 for order in result[symbol]:
                     if order.quantity < 0: #short
                         #check limit enforcement
-                        if old_quantity + short_sum > position_limits_dict[symbol]:
+                        if abs(old_quantity) + short_sum > position_limits_dict[symbol]:
                             continue
                         total_request = abs(order.quantity)
                         ratio_denominator+=total_request
+
+                        
+                    
                         while total_request > 0 and len(bids_sorted) != 0 and bids_sorted[0][0] >= order.price:
                              delta = min(bids_sorted[0][1], total_request)
                              total_request-=delta
                              bids_sorted[0][1]-=delta
                              position[symbol]-=delta 
                              own_trades[symbol].append(Trade(symbol, bids_sorted[0][0], -delta, "", "SUBMISSION", state.timestamp))
-                             if bids_sorted[0][1] == 0:
+                             if bids_sorted[0][1] <= 0:
                                 del bids_sorted[0]
                         fill_ratios[symbol]+=abs(order.quantity)-total_request
+                        short_denominator+=abs(order.quantity)-total_request
+
+                        # short probablistic fill
+                        if enable_probabilistic_fills and len(asks_sorted) != 0 and total_request >0:
+                            best_ask = asks_sorted[0][0]
+                            edge = (best_ask-order.price) / self.tick_sizes[symbol]
+                            if edge <= -self.edge_limit: # too far
+                                continue
+
+                            # probability (shifted logistic)
+                            fill_prob = self.get_fill_probability(edge)
+                            if random.random() < fill_prob:
+                                fill_fraction = self.get_fill_amount(edge)
+                                reaching_volume = max(1,int(round(fill_fraction * abs(order.quantity))))
+                                delta = min(abs(reaching_volume), total_request)
+                                total_request -= delta
+                                position[symbol] -= delta
+
+                                own_trades[symbol].append(
+                                    Trade(symbol, order.price, -delta, "", "SUBMISSION", state.timestamp)
+                                )
+                                short_denominator+=delta
+                                fill_ratios[symbol] += delta
                     else: #long
                         #check limit enforcement
                         if old_quantity + long_sum > position_limits_dict[symbol]:
                             continue
+                        
                         total_request = order.quantity
                         ratio_denominator+=total_request
+                        
+            
+
+
                         while total_request > 0 and len(asks_sorted) != 0 and asks_sorted[0][0] <= order.price:
                              delta = min(abs(asks_sorted[0][1]), total_request)
                              total_request-=delta
                              asks_sorted[0][1]+=delta
                              position[symbol]+=delta 
                              own_trades[symbol].append(Trade(symbol, asks_sorted[0][0], delta, "SUBMISSION", "", state.timestamp))
-                             if asks_sorted[0][1] == 0:
+                             if asks_sorted[0][1] >= 0:
                                 del asks_sorted[0]
                         fill_ratios[symbol]+=order.quantity-total_request
+                        long_denominator+=order.quantity-total_request
+
+                        # long probablistic fill
+                        if enable_probabilistic_fills and len(bids_sorted) != 0 and total_request >0:
+
+                            best_bid = bids_sorted[0][0]
+                            edge = (order.price - best_bid) / self.tick_sizes[symbol]
+
+                            if edge <= -self.edge_limit: # too far
+                                continue
+
+                            fill_prob = self.get_fill_probability(edge)
+
+                            if random.random() < fill_prob:
+                                fill_fraction = self.get_fill_amount(edge)
+                                reaching_volume = max(1,int(round(fill_fraction * order.quantity)))
+                                delta = min(reaching_volume, total_request)
+                                total_request -= delta
+                                position[symbol] += delta
+
+                                own_trades[symbol].append(
+                                    Trade(symbol, order.price, delta, "SUBMISSION", "", state.timestamp)
+                                )
+                                long_denominator+=delta
+
+                                fill_ratios[symbol] += delta
                 fill_ratios[symbol]/=max(1,ratio_denominator) # div by zero err
             t_pnl:float = 0
             for symbol in self.symbols:

@@ -24,6 +24,11 @@ class BacktestingResult:
         self.graphing_functions = {
             "inventory": self.graph_inventory
         }
+        self.available_colors: List[str] =["orange", "green", "purple", "red", "blue", "black", "gray", "cyan"]
+        self.colors: Dict[str, str] = {}
+        for i, symbol in enumerate(position_history[0]):
+            self.colors[symbol]=self.available_colors[i]
+        
         self.symbols: List[str] = []
         for symbol in position_history[0]:
             self.symbols.append(symbol)
