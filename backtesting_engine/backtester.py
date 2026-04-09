@@ -21,23 +21,38 @@ class Backtester:
         self.trades.sort(key=lambda t: t.timestamp)
 
         # Probabilistic fill settings
-        self.edge_limit = 2
-        self.k: float = 2
+        self.edge_limit: int = 2
+        self.k: float = 0.8
         self.fill_min: float = 0.1
         self.fill_max: float = 0.2
-        self.shifter: float = 2.5
-        self.tick_sizes = {
-            "EMERALDS": 2,
+        self.shifter: float = 5
+        self.default_tick: int = 1
+        self.tick_sizes: Dict[str, int] = {
+            "EMERALDS": 1,
             "TOMATOES": 1
         }
+        self.custom_shifter: Dict[str, float] ={
+            "EMERALDS": 1.5
+        }
+        self.alpha: float = 0.2
+        self.p: float = 0.2
+        self.new_weight: float = 0.1
+        self.microvol: Dict[str, float] = {}
+        self.ema_per_symbol: Dict[str, float] = {}
+        
+        for symbol in self.symbols:
+            self.ema_per_symbol[symbol]=-1
+            self.microvol[symbol]=1
     def include_observations(self, observation_csv_name:str):
         pass
-    def get_fill_probability(self, edge: int) -> float:
-        return 1 / (1 + math.exp(-(self.k * (edge-self.shifter))))
-    def get_fill_amount(self, edge: int) -> float:
+    def get_fill_probability(self, edge: int, symbol: str) -> float:
+        return 1 / (1 + math.exp(-(self.k * (min(5, edge)-self.custom_shifter.get(symbol, self.shifter)))))
+    def get_fill_amount(self, edge: int, symbol: str) -> float:
         rng: float = random.uniform(self.fill_min, self.fill_max)
-        edge_aspect: float = self.get_fill_probability(edge)
+        edge_aspect: float = self.get_fill_probability(edge, symbol)
         return rng*edge_aspect
+    def get_predicted_volume(self, fill_fraction: float) ->int:
+        return int(fill_fraction*np.random.geometric(p=self.p))
     def run_trader(self, trader: Trader, enable_probabilistic_fills: bool = False) -> BacktestingResult:
         own_trades: Dict[Symbol, List[Trade]] = {}
         market_trades: Dict[Symbol, List[Trade]] = {}
@@ -61,6 +76,8 @@ class Backtester:
             position[symbol] = 0
         
         for trading_state in self.trading_states:
+            # Update microvolatility
+            
             state: TradingState = trading_state
             state.traderData = traderData
             state.position=position.copy()
@@ -114,18 +131,30 @@ class Backtester:
                 # Create mini order book
                 asks_sorted=[]
                 bids_sorted=[]
+                buy_side_qty: int = 0
+                asks_side_qty: int = 0
                 for price_level in state.order_depths[symbol].sell_orders:
                     asks_sorted.append([price_level, state.order_depths[symbol].sell_orders[price_level]])
+                    asks_side_qty+=abs(state.order_depths[symbol].sell_orders[price_level])
 
                 for price_level in state.order_depths[symbol].buy_orders:
                     bids_sorted.append([price_level, state.order_depths[symbol].buy_orders[price_level]])
+                    buy_side_qty += state.order_depths[symbol].buy_orders[price_level]
              
-
+                
                 asks_sorted.sort()
                 bids_sorted.sort(reverse=True)
                 old_quantity = position[symbol]
                 
+                # Update microvolatility for taker behavior
+                mid_price:float = (bids_sorted[0][0]+asks_sorted[0][0])/2
+                OBI:float = (buy_side_qty-asks_side_qty) / (buy_side_qty+asks_side_qty)
+                if self.ema_per_symbol[symbol]==-1:
+                    self.ema_per_symbol[symbol]=mid_price
+                else:
+                    self.ema_per_symbol[symbol] = self.alpha * mid_price + (1 - self.alpha) * self.ema_per_symbol[symbol]
                 
+                self.microvol[symbol]=(1-self.new_weight) * self.microvol[symbol] + self.new_weight * abs(mid_price - self.ema_per_symbol[symbol])
                 
 
                 for order in result[symbol]:
@@ -152,15 +181,18 @@ class Backtester:
                         # short probablistic fill
                         if enable_probabilistic_fills and len(asks_sorted) != 0 and total_request >0:
                             best_ask = asks_sorted[0][0]
-                            edge = (best_ask-order.price) / self.tick_sizes[symbol]
+                            edge = (best_ask-order.price) / self.tick_sizes.get(symbol, self.default_tick)
+                            
                             if edge <= -self.edge_limit: # too far
                                 continue
-
+                            #apply norm on edge:
+                            edge/=max(self.microvol[symbol], 1)
                             # probability (shifted logistic)
-                            fill_prob = self.get_fill_probability(edge)
+                            fill_prob = self.get_fill_probability(edge, symbol)
                             if random.random() < fill_prob:
-                                fill_fraction = self.get_fill_amount(edge)
-                                reaching_volume = max(1,int(round(fill_fraction * abs(order.quantity))))
+                                fill_fraction = self.get_fill_amount(edge, symbol)
+                                reaching_volume = self.get_predicted_volume(fill_fraction)
+        
                                 delta = min(abs(reaching_volume), total_request)
                                 total_request -= delta
                                 position[symbol] -= delta
@@ -196,16 +228,19 @@ class Backtester:
                         if enable_probabilistic_fills and len(bids_sorted) != 0 and total_request >0:
 
                             best_bid = bids_sorted[0][0]
-                            edge = (order.price - best_bid) / self.tick_sizes[symbol]
+                            edge = (order.price - best_bid) / self.tick_sizes.get(symbol, self.default_tick)
 
                             if edge <= -self.edge_limit: # too far
                                 continue
-
-                            fill_prob = self.get_fill_probability(edge)
+                            #apply norm on edge:
+                            edge/=max(1,self.microvol[symbol])
+                            fill_prob = self.get_fill_probability(edge, symbol)
 
                             if random.random() < fill_prob:
-                                fill_fraction = self.get_fill_amount(edge)
-                                reaching_volume = max(1,int(round(fill_fraction * order.quantity)))
+                                fill_fraction = self.get_fill_amount(edge, symbol)
+                                reaching_volume = self.get_predicted_volume(fill_fraction)
+   
+                                #if reaching_volume
                                 delta = min(reaching_volume, total_request)
                                 total_request -= delta
                                 position[symbol] += delta
