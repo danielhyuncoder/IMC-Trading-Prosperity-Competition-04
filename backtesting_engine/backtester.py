@@ -10,6 +10,7 @@ from visualizer import BacktestingResult
 import math
 import numpy as np
 import random
+import copy
 load_dotenv()
 
 
@@ -32,7 +33,9 @@ class Backtester:
             "TOMATOES": 1
         }
         self.custom_shifter: Dict[str, float] ={
-            "EMERALDS": 1.5
+            "EMERALDS": 1,
+            "TOMATOES": 1.5
+        
         }
         self.alpha: float = 0.2
         self.p: float = 0.2
@@ -45,15 +48,17 @@ class Backtester:
             self.microvol[symbol]=1
     def include_observations(self, observation_csv_name:str):
         pass
-    def get_fill_probability(self, edge: int, symbol: str) -> float:
-        return 1 / (1 + math.exp(-(self.k * (min(5, edge)-self.custom_shifter.get(symbol, self.shifter)))))
-    def get_fill_amount(self, edge: int, symbol: str) -> float:
+    def get_fill_probability(self, edge: int, symbol: str, obi_ratio: float) -> float:
+        return (1 / (1 + math.exp(-(self.k * (min(5, edge)-self.custom_shifter.get(symbol, self.shifter)))))) * obi_ratio
+    def get_def_probability(self, edge:int, symbol: str) -> float:
+        return (1 / (1 + math.exp(-(self.k * (min(5, edge)-self.custom_shifter.get(symbol, self.shifter))))))
+    def get_fill_amount(self, edge: int, symbol: str, obi_ratio: float) -> float:
         rng: float = random.uniform(self.fill_min, self.fill_max)
-        edge_aspect: float = self.get_fill_probability(edge, symbol)
+        edge_aspect: float = self.get_def_probability(edge, symbol)
         return rng*edge_aspect
     def get_predicted_volume(self, fill_fraction: float) ->int:
         return int(fill_fraction*np.random.geometric(p=self.p))
-    def run_trader(self, trader: Trader, enable_probabilistic_fills: bool = False) -> BacktestingResult:
+    def run_trader(self, trader: Trader, enable_probabilistic_fills: bool = False, enable_market_trades: bool = True) -> BacktestingResult:
         own_trades: Dict[Symbol, List[Trade]] = {}
         market_trades: Dict[Symbol, List[Trade]] = {}
         position: Dict[Symbol, Position] = {}
@@ -140,7 +145,15 @@ class Backtester:
                 for price_level in state.order_depths[symbol].buy_orders:
                     bids_sorted.append([price_level, state.order_depths[symbol].buy_orders[price_level]])
                     buy_side_qty += state.order_depths[symbol].buy_orders[price_level]
-             
+                
+                market_trades_bids_sorted=[]
+                market_trades_asks_sorted=[]
+                if enable_market_trades:
+                    for m_t in state.market_trades[symbol]:
+                        market_trades_bids_sorted.append([m_t.price, m_t.quantity])
+                        market_trades_asks_sorted.append([m_t.price, -m_t.quantity])
+                    market_trades_asks_sorted.sort()
+                    market_trades_bids_sorted.sort(reverse=True)
                 
                 asks_sorted.sort()
                 bids_sorted.sort(reverse=True)
@@ -166,7 +179,7 @@ class Backtester:
                         ratio_denominator+=total_request
 
                         
-                    
+                        # aggressive fills
                         while total_request > 0 and len(bids_sorted) != 0 and bids_sorted[0][0] >= order.price:
                              delta = min(bids_sorted[0][1], total_request)
                              total_request-=delta
@@ -175,6 +188,17 @@ class Backtester:
                              own_trades[symbol].append(Trade(symbol, bids_sorted[0][0], -delta, "", "SUBMISSION", state.timestamp))
                              if bids_sorted[0][1] <= 0:
                                 del bids_sorted[0]
+                        # passive fills
+                        for mt in market_trades_bids_sorted:
+                            if mt[0] >= order.price and mt[1]>0:
+                                delta = min(total_request, mt[1])
+                                total_request -= delta
+                                mt[1] -= delta
+                                position[symbol] -= delta
+                                own_trades[symbol].append(Trade(symbol, mt[0], -delta, "", "SUBMISSION", state.timestamp))
+                            else:
+                                break
+
                         fill_ratios[symbol]+=abs(order.quantity)-total_request
                         short_denominator+=abs(order.quantity)-total_request
 
@@ -188,9 +212,9 @@ class Backtester:
                             #apply norm on edge:
                             edge/=max(self.microvol[symbol], 1)
                             # probability (shifted logistic)
-                            fill_prob = self.get_fill_probability(edge, symbol)
+                            fill_prob = self.get_fill_probability(edge, symbol, 0.5-(OBI/2))
                             if random.random() < fill_prob:
-                                fill_fraction = self.get_fill_amount(edge, symbol)
+                                fill_fraction = self.get_fill_amount(edge, symbol, 0.5-(OBI/2))
                                 reaching_volume = self.get_predicted_volume(fill_fraction)
         
                                 delta = min(abs(reaching_volume), total_request)
@@ -212,7 +236,7 @@ class Backtester:
                         
             
 
-
+                        # aggressive fills
                         while total_request > 0 and len(asks_sorted) != 0 and asks_sorted[0][0] <= order.price:
                              delta = min(abs(asks_sorted[0][1]), total_request)
                              total_request-=delta
@@ -221,9 +245,20 @@ class Backtester:
                              own_trades[symbol].append(Trade(symbol, asks_sorted[0][0], delta, "SUBMISSION", "", state.timestamp))
                              if asks_sorted[0][1] >= 0:
                                 del asks_sorted[0]
+                        #passive fills
+                        for mt in market_trades_asks_sorted:
+                            if mt[0] <= order.price and mt[1] < 0:
+                                delta = min(total_request, abs(mt[1]))
+                                total_request -= delta
+                                mt[1] += delta
+                                position[symbol] += delta
+                                own_trades[symbol].append(Trade(symbol, mt[0], delta, "SUBMISSION", "", state.timestamp))
+                                
+                            else:
+                                break
+                        
                         fill_ratios[symbol]+=order.quantity-total_request
                         long_denominator+=order.quantity-total_request
-
                         # long probablistic fill
                         if enable_probabilistic_fills and len(bids_sorted) != 0 and total_request >0:
 
@@ -234,10 +269,10 @@ class Backtester:
                                 continue
                             #apply norm on edge:
                             edge/=max(1,self.microvol[symbol])
-                            fill_prob = self.get_fill_probability(edge, symbol)
+                            fill_prob = self.get_fill_probability(edge, symbol, 0.5+(OBI/2))
 
                             if random.random() < fill_prob:
-                                fill_fraction = self.get_fill_amount(edge, symbol)
+                                fill_fraction = self.get_fill_amount(edge, symbol, 0.5+(OBI/2))
                                 reaching_volume = self.get_predicted_volume(fill_fraction)
    
                                 #if reaching_volume
