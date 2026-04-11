@@ -95,3 +95,26 @@ def csv_to_trading_states(file_path: str) -> List[TradingState]:
 
     return ans
 
+def group_to_trading_states(group: List[str]) -> List[TradingState]:
+    trading_states: List[TradingState] = []
+    last:int = 0
+    
+    for ix in range(len(group)):
+        t_states: List[TradingState] = csv_to_trading_states(group[ix])
+        last_ts: int = t_states[len(t_states)-1].timestamp
+        for st in t_states:
+            st.timestamp+=last
+            trading_states.append(st)
+        last+=last_ts+100
+    return trading_states
+
+def group_to_trades(group: List[str], inc: int) -> List[Trade]:
+    trades: List[Trade] = []
+    last:int = 0
+    for ix in range(len(group)):
+        t_trades: List[Trade] = csv_to_trades(group[ix])
+        for st in t_trades:
+            st.timestamp+=last
+            trades.append(st)
+        last+=inc
+    return trades

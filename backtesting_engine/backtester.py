@@ -2,7 +2,7 @@ from datamodel import TradingState, Listing, OrderDepth, Observation, Symbol, Tr
 import pandas as pd
 import os
 from typing import Dict, List
-from data_parser import csv_to_trading_states, csv_to_trades, get_all_symbols
+from data_parser import csv_to_trading_states, csv_to_trades, get_all_symbols, group_to_trades, group_to_trading_states
 from trader import Trader
 from dotenv import load_dotenv
 from position_limits import position_limits_dict
@@ -15,10 +15,19 @@ load_dotenv()
 
 
 class Backtester:
-    def __init__(self, order_book_csv_name: str, trades_csv_name: str):
-        self.trading_states = csv_to_trading_states(order_book_csv_name)
-        self.symbols= get_all_symbols(order_book_csv_name)
-        self.trades = csv_to_trades(trades_csv_name)
+    def __init__(self, order_book_csv_name: list | str, trades_csv_name: list | str):
+        if type(order_book_csv_name) == list:
+            if type(trades_csv_name) != list:
+                raise Exception("If one parameter is a list, the other must be too. Prevents double counting liquidity.")
+            if len(order_book_csv_name) != len(trades_csv_name):
+                raise Exception("Both the number of order book csv files and trades csv files must be the same.")
+            self.trading_states: List[TradingState] = group_to_trading_states(order_book_csv_name)
+            self.trades: List[Trade] = group_to_trades(trades_csv_name, 1000000)
+            self.symbols= get_all_symbols(order_book_csv_name[0])
+        else:
+            self.trading_states = csv_to_trading_states(order_book_csv_name)
+            self.trades = csv_to_trades(trades_csv_name)
+            self.symbols= get_all_symbols(order_book_csv_name)
         self.trades.sort(key=lambda t: t.timestamp)
 
         # Probabilistic fill settings
@@ -26,7 +35,7 @@ class Backtester:
         self.k: float = 0.8
         self.fill_min: float = 0.1
         self.fill_max: float = 0.2
-        self.shifter: float = 5
+        self.shifter: float = 1.5
         self.default_tick: int = 1
         self.tick_sizes: Dict[str, int] = {
             "EMERALDS": 1,
@@ -116,7 +125,6 @@ class Backtester:
                 market_trades[self.trades[trade_ptr].symbol].append(self.trades[trade_ptr])
                 trade_ptr+=1
             
-            
             # Update positions & fill orders
             for symbol in self.symbols:
                 # check position limits first
@@ -173,7 +181,8 @@ class Backtester:
                 for order in result[symbol]:
                     if order.quantity < 0: #short
                         #check limit enforcement
-                        if abs(old_quantity) + short_sum > position_limits_dict[symbol]:
+                        
+                        if old_quantity - short_sum < -position_limits_dict.get(symbol, 80):
                             continue
                         total_request = abs(order.quantity)
                         ratio_denominator+=total_request
@@ -190,7 +199,9 @@ class Backtester:
                                 del bids_sorted[0]
                         # passive fills
                         for mt in market_trades_bids_sorted:
+                            
                             if mt[0] >= order.price and mt[1]>0:
+          
                                 delta = min(total_request, mt[1])
                                 total_request -= delta
                                 mt[1] -= delta
@@ -228,7 +239,7 @@ class Backtester:
                                 fill_ratios[symbol] += delta
                     else: #long
                         #check limit enforcement
-                        if old_quantity + long_sum > position_limits_dict[symbol]:
+                        if old_quantity + long_sum > position_limits_dict.get(symbol, 80):
                             continue
                         
                         total_request = order.quantity
