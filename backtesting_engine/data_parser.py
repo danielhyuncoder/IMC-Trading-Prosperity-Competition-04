@@ -3,7 +3,8 @@ import pandas as pd
 import os
 from typing import Dict, List
 from dotenv import load_dotenv
-IGNORE_COLS = {"mid_price", "product", "profit_and_loss", "buyer", "seller", "symbol"}
+IGNORE_COLS_INT = {"mid_price", "product", "profit_and_loss", "buyer", "seller", "symbol"}
+
 load_dotenv()
 
 def clean_df(raw_df: pd.DataFrame) -> pd.DataFrame:
@@ -17,9 +18,23 @@ def clean_df(raw_df: pd.DataFrame) -> pd.DataFrame:
       df["seller"].replace(0, "", inplace=True)
       df["currency"].replace(0, DENOMINATION, inplace=True)
     for col in df.columns:
-        if col not in IGNORE_COLS:
+        if col not in IGNORE_COLS_INT:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
+        if col == "mid_price":
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(float)
     return df
+
+def get_group_prices(file_paths: List[str]) -> pd.DataFrame:
+    base_df: pd.DataFrame = pd.DataFrame()
+    for path in file_paths:
+        try:
+            raw_df: pd.DataFrame = clean_df(pd.read_csv(path))
+        except Exception as e:
+            raise Exception(f"File cannot be read: {e}")
+        base_df=pd.concat([base_df, raw_df])
+    base_df.reset_index(inplace=True)
+    return base_df
+
 
 def get_all_symbols(file_path: str) -> List[str]:
     try:
@@ -118,3 +133,4 @@ def group_to_trades(group: List[str], inc: int) -> List[Trade]:
             trades.append(st)
         last+=inc
     return trades
+

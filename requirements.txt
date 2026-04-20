@@ -9,3 +9,4 @@ scikit-learn
 tqdm
 typing
 python-dotenv
+seaborn

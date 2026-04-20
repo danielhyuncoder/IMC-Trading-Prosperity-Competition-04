@@ -168,8 +168,11 @@ class Backtester:
                 old_quantity = position[symbol]
                 
                 # Update microvolatility for taker behavior
-                mid_price:float = (bids_sorted[0][0]+asks_sorted[0][0])/2
-                OBI:float = (buy_side_qty-asks_side_qty) / (buy_side_qty+asks_side_qty)
+                if len(bids_sorted) > 0 and len(asks_sorted) > 0:
+                    mid_price:float = (bids_sorted[0][0]+asks_sorted[0][0])/2
+                else:
+                    mid_price: float = 0
+                OBI:float = (buy_side_qty-asks_side_qty) / max(1,(buy_side_qty+asks_side_qty))
                 if self.ema_per_symbol[symbol]==-1:
                     self.ema_per_symbol[symbol]=mid_price
                 else:
@@ -206,7 +209,7 @@ class Backtester:
                                 total_request -= delta
                                 mt[1] -= delta
                                 position[symbol] -= delta
-                                own_trades[symbol].append(Trade(symbol, mt[0], -delta, "", "SUBMISSION", state.timestamp))
+                                own_trades[symbol].append(Trade(symbol, order.price, -delta, "", "SUBMISSION", state.timestamp))
                             else:
                                 break
 
@@ -263,7 +266,7 @@ class Backtester:
                                 total_request -= delta
                                 mt[1] += delta
                                 position[symbol] += delta
-                                own_trades[symbol].append(Trade(symbol, mt[0], delta, "SUBMISSION", "", state.timestamp))
+                                own_trades[symbol].append(Trade(symbol, order.price, delta, "SUBMISSION", "", state.timestamp))
                                 
                             else:
                                 break
