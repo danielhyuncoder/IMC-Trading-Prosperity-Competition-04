@@ -1,4 +1,4 @@
 position_limits_dict = {
-    "TOMATOES": 80,
-    "EMERALDS": 80
+    "HYDROGEL_PACK": 200,
+    "VELVETFRUIT_EXTRACT": 200
 }

@@ -10,3 +10,4 @@ tqdm
 typing
 python-dotenv
 seaborn
+scipy

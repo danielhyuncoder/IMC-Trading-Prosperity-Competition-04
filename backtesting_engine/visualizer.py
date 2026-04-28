@@ -24,7 +24,17 @@ class BacktestingResult:
         self.graphing_functions = {
             "inventory": self.graph_inventory
         }
-        self.available_colors: List[str] =["orange", "green", "purple", "red", "blue", "black", "gray", "cyan"]
+        self.available_colors: List[str] =[
+    "red", "blue", "green", "orange", "purple",
+    "cyan", "magenta", "yellow", "black", "gray",
+
+    "gold", "teal", "indigo", "salmon", "olive",
+    "navy", "maroon", "turquoise", "tomato", "orchid",
+
+    "skyblue", "limegreen", "sienna", "slateblue", "darkkhaki",
+    "coral", "mediumseagreen", "royalblue", "chocolate", "deeppink"
+]
+
         self.colors: Dict[str, str] = {}
         for i, symbol in enumerate(position_history[0]):
             self.colors[symbol]=self.available_colors[i]
