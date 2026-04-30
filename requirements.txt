@@ -11,3 +11,4 @@ typing
 python-dotenv
 seaborn
 scipy
+statsmodels
