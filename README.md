@@ -50,7 +50,7 @@ We were given the formulas for Research and Scale, which I quickly converted to 
 
 
 
-## Functions for research and speed
+## Functions for research and scale
 
 
 ```python
@@ -60,5 +60,78 @@ We were given the formulas for Research and Scale, which I quickly converted to 
     return (invested*7)/100
 ```
 
+I recognized quickly that the function for research gave largely diminishing returns the more I invested into it. For scale, I realized that it was linear in terms of returns. Nevertheless I made a brute force script where I found out that the optimal allocation of investment of these two multipliers ALONE (ignoring the speed multiplier) was 23 and 77. Even if I invested 0 into the speed multiplier, it would garuntee give at least a multiplier of 1.
+
+However, the obvious elephant in the room was speed, which was completely based on how highly you ranked in overall investment. Due to this, I made a estimation by firstly estimating the sizes of specific populations in the competition (Troll players, Conservative players (low), Reasonable players (mid), Aggressive players (high)). I ended up deriving the following code by combining multiple normal CDFs together:
+
+
+
+
+```python
+def probability_fn(s):
+    p_troll = 0.05
+    p_low = 0.3
+    p_mid = 0.5
+    p_high=0.15
+    return (
+        p_troll * norm.cdf(s, 95, 3) + 
+        p_low * norm.cdf(s, 8, 4) +
+        p_mid * norm.cdf(s, 40, 10) +
+        p_high * norm.cdf(s, 85, 8)
+    )
+
+def speed(invested:int) -> float: # Wild card
+    if invested==0:
+        return WORST_SPEED_MULT
+    ans = 0.1 + 0.8*probability_fn(invested)
+    return max(WORST_SPEED_MULT, ans)
+```
+
+Then made a brute-force script, alongside a heatmap, which according to my calculations discovered (14, 42, 44) was the optimal investment choice, with a calculated profit of ~ 157,763 XIRECS.
+
+```python
+best_answer = (1,1,1)
+best_payoff = 0
+heat_map = []
+for research_invested in range(1, 100):
+    scale_left = 100 - research_invested
+    mp_row = [0 for i in range(1, 100)]
+    for scale_invested in range(1, scale_left+1):
+        speed_left = 100 - research_invested - scale_invested
+        for speed_invested in range(1, speed_left+1):
+            research_cost = (research_invested/100) * BUDGET_SIZE
+            scale_cost = (scale_invested/100) * BUDGET_SIZE
+            speed_cost = (speed_invested/100) * BUDGET_SIZE
+            budget_used = research_cost+scale_cost+speed_cost
+            payoff = (research(research_invested) * scale(scale_invested) * speed(speed_invested)) - budget_used
+            if speed_invested==speed_left:
+                mp_row[scale_invested] = payoff
+            if payoff > best_payoff:
+                best_answer = (research_invested, scale_invested,speed_invested)
+                best_payoff = payoff
+    heat_map.append(mp_row)
+
+print("Best Answer: " + str(best_answer))
+print("Best Payoff: " + str(best_payoff)) 
+```
+## Results (Round 2)
+
+Due to my decision to play it save with the algorithimic round, I ended up with a total profit of ~366,000 XIRECS, which was more than enough to qualify for the finalist rounds. My manual profit was also lower than expected - being around ~120,000 XIRECS rather than the aforementioned ~157,763 XIRECS I calculated. I realized it was mainly due to the fact that in the last minute, I decided that the approximated distribution of players would choose more conservative numbers. If I had stuck with my original distribution, I would've made around 150,000+ XIRECS on the manual round.
+
+## Round 3
+Round 3 was by far the "wakeup call" round for me. This round introduced SIGNIFICANTLY harder assets to trade in the algorithimic challenge, with it introducing options-like assets in the form of Starfruit Packs with distinct strike prices. In addition, it introduced a tricky wide range mean reverting asset: Hydrogel. Due to the sheer difficulty of this round, I failed to adapt in time to make profit in the algorithimic round, shifting my focus on making PNL completely on the manual rounds. 
+
+
+## Round 3 (Algorithimic)
+In the algorithmic challenge of round 3, I attempted to first construct an IV scalping strategy. In order to get derived implied volatilities, I utilized the orderbook data provided for the Starfruit Pack options and simply implemented a small-step binary search algorithim to derive the implied volatilities. Then I plotted an IV curve, which was oddly very rough. When I then attempted to implement the IV scalping strategy, my backtester kept showing large negative PNL and drawdowns. I tried to implement a z-score system to take trades but I couldn't find a way to make this profitable.
+
+When attempting to trade Hydrogel packs, I first tried to test if standard market-making strategies would work. However, I quickly realized from my backtester that there was a severe lack of liquidity, which made market making impossible. Afterwards I attempted to try mean reversion strategies such as the kalman filter and decaying midrange - which was in vain. In hindsight, I should've used the wall-mid indicator instead, as it was able to sucessfully adapt to the large scale regime shifts of Hydrogel packs. However, at the end, I couldn't get a single strategy to work so I ended up submitting nothing.
+
+## Round 3 (Manual)
+In the manual challenge of round 3, I 
+
+## Results (Round 3)
+
+After this round ended, I had made around 166,000 XIRECS in profit, which was nearly enough to qualify for the finalist rounds alone. For manual I made 71,500 XIRECS, and for my algorithim I made around 94,500 XIRECS in profit. 
 I recognized quickly that the function for research gave largely diminishing returns the more I invested into it. For scale, I realized that it was linear in terms of returns. Nevertheless I made a brute force script where I found out that the optimal allocation of investment of these two multipliers ALONE (ignoring the speed multiplier) was 23 and 77. Even if I invested 0 into the speed multiplier, it would garuntee give at least a multiplier of 1. 
 
