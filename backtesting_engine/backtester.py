@@ -15,7 +15,7 @@ load_dotenv()
 
 
 class Backtester:
-    def __init__(self, order_book_csv_name: list | str, trades_csv_name: list | str):
+    def __init__(self, order_book_csv_name, trades_csv_name):
         if type(order_book_csv_name) == list:
             if type(trades_csv_name) != list:
                 raise Exception("If one parameter is a list, the other must be too. Prevents double counting liquidity.")
@@ -37,6 +37,7 @@ class Backtester:
         self.fill_max: float = 0.2
         self.shifter: float = 1.5
         self.default_tick: int = 1
+        self.valid_prices_per_symbol={}
         self.tick_sizes: Dict[str, int] = {
             "EMERALDS": 1,
             "TOMATOES": 1
@@ -321,12 +322,18 @@ class Backtester:
                 asks = state.order_depths[symbol].sell_orders
                 if bids and asks:
                     mid_price = (max(bids) + min(asks)) / 2
+                    self.valid_prices_per_symbol[symbol]=mid_price
                 elif bids:
                     mid_price = max(bids)
+                    self.valid_prices_per_symbol[symbol]=mid_price
                 elif asks:
                     mid_price = min(asks)
+                    self.valid_prices_per_symbol[symbol]=mid_price
                 else:
-                    mid_price = 0
+                    if symbol in self.valid_prices_per_symbol:
+                        mid_price=self.valid_prices_per_symbol[symbol]
+                    else:
+                        mid_price = 0
 
                 current_pnl[symbol] = position[symbol] * mid_price
                 t_pnl+=current_pnl[symbol]
